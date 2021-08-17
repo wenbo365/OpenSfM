@@ -194,6 +194,8 @@ class Gui:
         button.pack(side="left")
         button = tk.Button(io_frame, text="Save As", command=self.save_gcps_as)
         button.pack(side="left")
+        button = tk.Button(io_frame, text="AutoSave", command=self.autosave)
+        button.pack(side="left")
 
     def create_ortho_views(self, ortho_paths, lat, lon):
         for ortho_p in ortho_paths:
@@ -369,7 +371,14 @@ class Gui:
             self.gcp_manager.write_to_file(self.quick_save_filename)
             parent = os.path.dirname(self.quick_save_filename)
             dirname = os.path.basename(parent)
-            self.gcp_manager.write_to_file(os.path.join(parent, dirname + ".json"))
+            output_path = os.path.join(parent, dirname + ".json")
+            self.gcp_manager.write_to_file(output_path)
+            print(f"Saved to {output_path}")
+
+    def autosave(self):
+        print("Autosaving")
+        self.save_gcps()
+        self.parent.after(1000 * 60 * 10, self.autosave)
 
     def save_gcps_as(self):
         filename = tk.filedialog.asksaveasfilename(
