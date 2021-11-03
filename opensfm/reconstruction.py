@@ -211,11 +211,13 @@ def direct_shot_neighbors(
     return neighbors
 
 
-def pairwise_reconstructability(common_tracks: int, rotation_inliers: int) -> float:
+def pairwise_reconstructability(
+    common_tracks: int, rotation_inliers: int, ratio_threshold: float
+) -> float:
     """Likeliness of an image pair giving a good initial reconstruction."""
     outliers = common_tracks - rotation_inliers
     outlier_ratio = float(outliers) / common_tracks
-    if outlier_ratio >= 0.3:
+    if outlier_ratio >= ratio_threshold:
         return outliers
     else:
         return 0
@@ -231,12 +233,25 @@ def compute_image_pairs(
 ) -> List[Tuple[str, str]]:
     """All matched image pairs sorted by reconstructability."""
     cameras = data.load_camera_models()
-    args = _pair_reconstructability_arguments(track_dict, cameras, data)
     processes = data.config["processes"]
+    args = _pair_reconstructability_arguments(track_dict, cameras, data)
     result = parallel_map(_compute_pair_reconstructability, args, processes)
-    result = list(result)
-    pairs = [(im1, im2) for im1, im2, r in result if r > 0]
-    score = [r for im1, im2, r in result if r > 0]
+
+    ratio_threshold_factor = 0.5
+    ratio_threshold = 0.3
+    pairs, result_ratio = [], []
+    while ratio_threshold > 0.001 and len(pairs) == 0:
+        logger.info(
+            f"Computing image pair with rotation ratio threshold of {ratio_threshold}"
+        )
+        result_ratio = [
+            (im1, im2, pairwise_reconstructability(common, inliers, ratio_threshold))
+            for im1, im2, common, inliers in result
+        ]
+        pairs = [(im1, im2) for im1, im2, r in result_ratio if r > 0]
+        ratio_threshold *= ratio_threshold_factor
+
+    score = [r for im1, im2, r in result_ratio if r > 0]
     order = np.argsort(-np.array(score))
     return [pairs[o] for o in order]
 
@@ -261,8 +276,7 @@ def _compute_pair_reconstructability(args: TPairArguments) -> Tuple[str, str, fl
     R, inliers = two_view_reconstruction_rotation_only(
         p1, p2, camera1, camera2, threshold
     )
-    r = pairwise_reconstructability(len(p1), len(inliers))
-    return (im1, im2, r)
+    return (im1, im2, len(p1), len(inliers))
 
 
 def add_shot(
