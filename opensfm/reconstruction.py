@@ -28,6 +28,7 @@ from opensfm import (
 from opensfm.align import align_reconstruction, apply_similarity
 from opensfm.context import current_memory_usage, parallel_map
 from opensfm.dataset_base import DataSetBase
+import ipdb
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -573,7 +574,7 @@ def reconstruction_from_relative_pose(
             data, reconstruction, rig_assignments, im2, pygeometry.Pose(R, t)
         )
 
-    align_reconstruction(reconstruction, [], data.config)
+    align_reconstruction(reconstruction, [], data.config, use_gps=False)
     triangulate_shot_features(tracks_manager, reconstruction, new_shots, data.config)
 
     logger.info("Triangulated: {}".format(len(reconstruction.points)))
@@ -733,6 +734,7 @@ def resect(
         report["shots"] = list(new_shots)
         return True, new_shots, report
     else:
+        print(np.linalg.norm(reprojected_bs - bs, axis=1))
         return False, set(), report
 
 
@@ -1425,6 +1427,7 @@ def grow_reconstruction(
         threshold = data.config["resection_threshold"]
         min_inliers = data.config["resection_min_inliers"]
         for image, _ in candidates:
+            print(image)
             ok, new_shots, resrep = resect(
                 data,
                 tracks_manager,

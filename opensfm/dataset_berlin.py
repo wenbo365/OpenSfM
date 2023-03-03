@@ -23,43 +23,6 @@ from PIL.PngImagePlugin import PngImageFile
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-import sys
-from os.path import abspath, join, dirname
-from data.lego.sequence_config import (start_id,
-                                            num_image, 
-                                            crop_parameters, 
-                                            merge_file_path_list, 
-                                            merge_index_list, 
-                                            key_frame_index_list)
-import ipdb
-
-def merge_point_cloud(
-                    pred_corr_list,
-                    merge_file_path,
-                    merge_id_list):
-    """
-    camera_indices: 每个点对应的相机编号
-    point_indices: 每个点对应的3D点编号
-    pointcloud: point_cloud
-    """
-    
-    CODE_PATH = '/source/OpenSfM/data/lego/features/'
-    pred_corr_path = os.path.join(CODE_PATH, f'{merge_file_path}')
-    with open(pred_corr_path, 'rb') as f:
-        merge_corr_list = pickle.load(f)
-    for index in merge_id_list:
-        pred_corr_list[index] = np.concatenate([pred_corr_list[index], 
-                                                merge_corr_list[index]], axis=0)            
-    return pred_corr_list        
-    
-def normalized_image_coordinates(
-        pixel_coords: np.ndarray, width: int, height: int
-    ) -> np.ndarray:
-        size = max(width, height)
-        p = np.empty((len(pixel_coords), 2))
-        p[:, 0] = (pixel_coords[:, 0] + 0.5 - width / 2.0) / size
-        p[:, 1] = (pixel_coords[:, 1] + 0.5 - height / 2.0) / size
-        return p
 
 class DataSet(DataSetBase):
     """Accessors to the main input and output data.
@@ -84,111 +47,10 @@ class DataSet(DataSetBase):
     def __init__(self, data_path: str, io_handler=io.IoFilesystemDefault) -> None:
         """Init dataset associated to a folder."""
         self.io_handler = io_handler
-        root_dir = abspath(join(dirname(__file__), "../"))
-        self.data_path = os.path.join(root_dir, data_path)
+        self.data_path = data_path
         self.load_config()
         self.load_image_list()
         self.load_mask_list()
-
-        img_dir = os.path.join(self.data_path, 'images/') 
-        img_name_list = sorted(os.listdir(img_dir))
-        for index in range(len(img_name_list)):
-            img_name_list[index] = os.path.join(img_dir, img_name_list[index])
-        self.image_list = img_name_list[start_id: num_image]
-        self.img_name_list = img_name_list[start_id: num_image]
-
-        corr_path = os.path.join(self.data_path, 'features/pred_corr_new.pkl')
-        with open(corr_path, 'rb') as f:
-            pred_corr_list = pickle.load(f)
-        pred_corr_list = pred_corr_list[start_id: num_image]
-
-        for merge_file_path, merge_id_list in zip(merge_file_path_list, merge_index_list): 
-            pred_corr_list = merge_point_cloud(pred_corr_list, merge_file_path, merge_id_list)
-        # pred_corr_list = pred_corr_list[25: num_image]
-
-        data_dir = '/source/OpenSfM/data/lego/features/'
-        query_best_key_frame_index_path = os.path.join(data_dir, 'query_to_key_frame_best_idx_new.pkl')
-        with open(query_best_key_frame_index_path, 'rb') as f:
-            query_best_key_frame_index = pickle.load(f)
-        query_best_key_frame_index = query_best_key_frame_index[start_id: num_image]
-    
-        for i in range(len(pred_corr_list)):
-            corr = pred_corr_list[i]
-            pred_corr_list[i] = corr * crop_parameters[2] / 560 + np.array([crop_parameters[1], crop_parameters[0]]) - 200
-            # pred_corr_list[i] = corr * crop_parameters[2] / 560 
-            pred_corr_list[i] = normalized_image_coordinates(pred_corr_list[i], width=1300, height=880)   
-            
-
-        # info_dir = '/source/OpenSfM/data/lego/'
-        # parameter_path = os.path.join(info_dir, 'crop_paramter.pkl')
-        # with open(parameter_path, 'rb') as f:
-        #     crop_parameter_list = pickle.load(f)
-
-        # for i in range(len(pred_corr_list)):
-        #     corr = pred_corr_list[i]
-        #     min_value = corr[:, 0].min()
-        #     pred_corr_list[i][:, 0] = corr[:, 0] - min_value + 50
-        #     pred_corr_list[i] = normalized_image_coordinates(pred_corr_list[i], width=1920, height=1080)   
-        
-        pred_corr_name_dict = {}
-        for index in range(len(pred_corr_list)):
-            pred_corr_name_dict.update({self.img_name_list[index]: pred_corr_list[index]})
-        self.pred_corr_name_dict = pred_corr_name_dict
-        
-        all_matches = {}
-        merge_index_list.insert(0, range(0, 0))
-        for merge_index, key_frame_index in zip(merge_index_list, key_frame_index_list):
-            
-            img_index_list = np.where(np.array(query_best_key_frame_index)==key_frame_index)[0].tolist()
-            img_cluster_name_list = []
-        
-            for img_index in img_index_list:
-                img_cluster_name_list.append(self.img_name_list[img_index])
-            
-            #  cluster
-            for index_ref in range(len(img_cluster_name_list)):
-                ref_img_name = img_cluster_name_list[index_ref]
-                if ref_img_name not in all_matches.keys():
-                    all_matches[ref_img_name] = {}
-
-                for index_query in range(index_ref + 1, len(img_cluster_name_list)):
-                    query_img_name = img_cluster_name_list[index_query]
-                    ref_feature = self.pred_corr_name_dict[ref_img_name]
-                    query_feature = self.pred_corr_name_dict[query_img_name]
-                    len_ref_feature = ref_feature.shape[0]
-                    len_query_feature = query_feature.shape[0] 
-                    
-                    if len_ref_feature == len_query_feature and len_ref_feature == 400:
-                        matches = np.stack([np.arange(0, 400), np.arange(0, 400)], axis=-1)
-                    else:
-                        matches = np.stack([np.arange(0, 200), np.arange(0, 200)], axis=-1)
-                    all_matches[ref_img_name].update({query_img_name: matches})
-
-            #  add some images in the cluster
-            if key_frame_index != 0:
-                added_img_index_list = merge_index
-                for added_img_index in added_img_index_list:
-
-                    ref_img_name = self.img_name_list[added_img_index]
-                    for index_query in range(len(img_cluster_name_list)):
-                        query_img_name = img_cluster_name_list[index_query]
-                        matches = np.stack([np.arange(200, 400), np.arange(0, 200)], axis=-1)
-                        all_matches[ref_img_name].update({query_img_name: matches})
-
-        ref_image_name_list = all_matches.keys()
-        for ref_image_name in ref_image_name_list:
-            query_image_name_list = all_matches[ref_image_name].keys()
-            for query_image_name in query_image_name_list:
-                matches = all_matches[ref_image_name][query_image_name]
-                matches = matches[:, [1, 0]]
-                all_matches[query_image_name].update({
-                    ref_image_name: matches
-                })
-        
-        self.matches = all_matches
-        for image_name in self.image_list:
-            self.image_files.update({image_name: image_name})
-            
 
     def _config_file(self) -> str:
         return os.path.join(self.data_path, "config.yaml")
@@ -202,46 +64,22 @@ class DataSet(DataSetBase):
             self.config = config.default_config()
 
     def _image_list_file(self) -> str:
-        
-        root_dir = abspath(join(dirname(__file__), "../"))
-        img_dir = os.path.join(root_dir, 'data/lego/images/')
-        img_name_list = sorted(os.listdir(img_dir))
- 
-        # img_dir = '/data-2/code/OpenSfM/data/lego/images/'
-        # img_name_list=sorted(os.listdir(img_dir))[0:20]
-        
-        for index in range(len(img_name_list)):
-            img_name_list[index] = os.path.join(img_dir, img_name_list[index])
-
-        return img_name_list
+        return os.path.join(self.data_path, "image_list.txt")
 
     def load_image_list(self) -> None:
-        # """Load image list from image_list.txt or list images/ folder."""
-        # image_list_file = self._image_list_file()
-        # image_list_path = os.path.join(self.data_path, "images")
-        # ipdb.set_trace()
-        # if self.io_handler.isfile(image_list_file):
-        #     with self.io_handler.open_rt(image_list_file) as fin:
-        #         lines = fin.read().splitlines()
-        #     self._set_image_list(lines)
-        # else:
-        #     self._set_image_path(image_list_path)
+        """Load image list from image_list.txt or list images/ folder."""
+        image_list_file = self._image_list_file()
+        image_list_path = os.path.join(self.data_path, "images")
 
-        # if self.data_path and not self.image_list:
-        #     raise IOError("No Images found in {}".format(image_list_path))
+        if self.io_handler.isfile(image_list_file):
+            with self.io_handler.open_rt(image_list_file) as fin:
+                lines = fin.read().splitlines()
+            self._set_image_list(lines)
+        else:
+            self._set_image_path(image_list_path)
 
-        root_dir = abspath(join(dirname(__file__), "../"))
-        print('root_dir', root_dir)
-    
-        img_dir = os.path.join(root_dir, 'data/lego/images/')
-        img_name_list = sorted(os.listdir(img_dir))
- 
-        # img_dir = '/data-2/code/OpenSfM/data/lego/images/'
-        # img_name_list=sorted(os.listdir(img_dir))[0:20]
-        
-        for index in range(len(img_name_list)):
-            img_name_list[index] = os.path.join(img_dir, img_name_list[index])
-        return img_name_list
+        if self.data_path and not self.image_list:
+            raise IOError("No Images found in {}".format(image_list_path))
 
     def images(self) -> List[str]:
         """List of file names of all images in the dataset."""
@@ -418,12 +256,10 @@ class DataSet(DataSetBase):
         Return path of exif information for given image
         :param image: Image name, with extension (i.e. 123.jpg)
         """
-        image = image.split('/')[-1]
         return os.path.join(self._exif_path(), image + ".exif")
 
     def load_exif(self, image: str) -> Dict[str, Any]:
         """Load pre-extracted image exif metadata."""
-        image = '/source/OpenSfM/data/lego/exif/00001.png'
         with self.io_handler.open_rt(self._exif_file(image)) as fin:
             return json.load(fin)
 
@@ -473,21 +309,14 @@ class DataSet(DataSetBase):
         ) or self.io_handler.isfile(self._feature_file_legacy(image))
 
     def load_features(self, image: str) -> Optional[features.FeaturesData]:
-        
-        # feature
-        # pred_corr_name: map image name to the correspondence
+        features_filepath = (
+            self._feature_file_legacy(image)
+            if self.io_handler.isfile(self._feature_file_legacy(image))
+            else self._feature_file(image)
+        )
+        with self.io_handler.open(features_filepath, "rb") as f:
+            return features.FeaturesData.from_file(f, self.config)
 
-        points = self.pred_corr_name_dict[image]
-        L, _ = points.shape
-        angle = np.ones((L, 1)) * 0.001
-        size = np.ones((L, 1)) * 0.001
-        points = np.concatenate([points, size, angle], axis=-1)
-        descriptors = np.ones([L, 128], dtype=np.float32)
-        colors = np.ones([L, 3], dtype=np.float32) * 255
-        colors[:, 1:3] = 0
-        return features.FeaturesData(
-            points, descriptors, colors, None) 
-        
     def save_features(self, image: str, features_data: features.FeaturesData) -> None:
         self._save_features(self._feature_file(image), features_data)
 
@@ -538,98 +367,18 @@ class DataSet(DataSetBase):
                     )
                 return getattr(self.modules_map[classname], name)
 
-        # with self.io_handler.open(self._matches_file(image), "rb") as fin:
-        #     matches = MatchingUnpickler(BytesIO(gzip.decompress(fin.read()))).load()
-        
-        return self.matches[image]
+        with self.io_handler.open(self._matches_file(image), "rb") as fin:
+            matches = MatchingUnpickler(BytesIO(gzip.decompress(fin.read()))).load()
+        return matches
 
     def save_matches(self, image: str, matches: Dict[str, np.ndarray]) -> None:
-        pass
-        # data_dir = '/Users/liwenbo/projects/output/lego_11/'
+        self.io_handler.mkdir_p(self._matches_path())
 
-        # query_best_key_frame_index_path = os.path.join(data_dir, 'query_to_key_frame_best_idx.pkl')
-        # with open(query_best_key_frame_index_path, 'rb') as f:
-        #     query_best_key_frame_index = pickle.load(f)
-
-        # path = os.path.join(data_dir, 'pred_corr.pkl')
-        # with open(path, 'rb') as f:
-        #     pred_corr = pickle.load(path)
-
-        # img_dir = '/data-2/code/OpenSfM/data/lego/images/'
-        # img_name_list=sorted(os.listdir(img_dir))[0:20]
-
-        # for index in range(len(img_name_list)):
-        #     img_name_list[index] = os.path.join(img_dir, img_name_list[index])
-
-        # all_matches = {}
-        # img_index_list = list(range(20))
-        # img_name_list = []
-
-        # # cluster
-        # for index_ref in range(len(img_index_list)):
-        #     ref_img_name = img_index_list[index_ref]
-        #     if all_matches not in all_matches.keys():
-        #         all_matches[ref_img_name] = {}
-
-        #     for index_query in range(index_ref + 1, len(img_index_list)):
-        #         query_img_name = img_index_list[index_query]
-        #         ref_feature = self.load_features(ref_img_name)
-        #         query_feature = self.load_features(query_img_name)
-        #         len_ref_feature = len(ref_feature)
-        #         len_query_feature = len(query_feature) 
-                
-        #         if len_ref_feature == len_query_feature and len_ref_feature == 200:
-        #             matches = np.stack([np.arange(0, 200), np.arange(0, 200)], axis=-1)
-        #         elif len_ref_feature == len_query_feature and len_ref_feature == 100:
-        #             matches = np.stack([np.arange(0, 100), np.arange(0, 100)], axis=-1)
-        #         else:
-        #             matches = np.stack([np.arange(100, 200), np.arange(0, 100)], axis=-1)
-        #         all_matches[ref_img_name].update({query_img_name: matches})
-
-        # all_matches = {}
-        # key_frame_index_list = []
-        # img_name_list = []
-
-        # for key_frame_index in key_frame_index_list:
-        #     img_index_list = np.where(query_best_key_frame_index==key_frame_index).tolist()
-        #     img_cluster_name_list = []
-        
-        #     for img_index in img_index_list:
-        #         img_cluster_name_list.append(img_name_list[img_index])
-            
-        #     #  cluster
-        #     for index_ref in range(len(img_cluster_name_list)):
-        #         ref_img_name = img_cluster_name_list[index_ref]
-        #         if all_matches not in all_matches.keys():
-        #             all_matches[ref_img_name] = {}
-
-        #         for index_query in range(index_ref + 1, len(img_cluster_name_list)):
-        #             query_img_name = img_cluster_name_list[index_query]
-        #             ref_feature = self.load_features(ref_img_name)
-        #             query_feature = self.load_features(query_img_name)
-        #             len_ref_feature = len(ref_feature)
-        #             len_query_feature = len(query_feature) 
-                    
-        #             if len_ref_feature == len_query_feature and len_ref_feature == 200:
-        #                 matches = np.stack([np.arange(0, 200), np.arange(0, 200)], axis=-1)
-        #             elif len_ref_feature == len_query_feature and len_ref_feature == 100:
-        #                 matches = np.stack([np.arange(0, 100), np.arange(0, 100)], axis=-1)
-        #             else:
-        #                 matches = np.stack([np.arange(100, 200), np.arange(0, 100)], axis=-1)
-        #             all_matches[ref_img_name].update({query_img_name: matches})
-
-        #     #  add some images in the cluster
-        #     added_img_index_list = []
-        #     for added_img_index in added_img_index_list:
-        #         ref_img_name = img_name_list[added_img_index]
-        #         for index_query in range(len(img_cluster_name_list)):
-        #             query_img_name = img_cluster_name_list[index_query]
-        #             matches = np.stack([np.arange(100, 200), np.arange(0, 100)], axis=-1)
-        #             all_matches[ref_img_name].update({query_img_name: matches})
-        
-        # all_matches_path = ''
-        # with open(all_matches_path) as f:
-        #     pickle.dump(all_matches, f)
+        with BytesIO() as buffer:
+            with gzip.GzipFile(fileobj=buffer, mode="w") as fzip:
+                pickle.dump(matches, fzip)
+            with self.io_handler.open(self._matches_file(image), "wb") as fw:
+                fw.write(buffer.getvalue())
 
     def find_matches(self, im1: str, im2: str) -> np.ndarray:
         if self.matches_exists(im1):

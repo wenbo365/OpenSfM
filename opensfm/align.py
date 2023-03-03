@@ -17,7 +17,7 @@ def align_reconstruction(
     reconstruction: types.Reconstruction,
     gcp: List[pymap.GroundControlPoint],
     config: Dict[str, Any],
-    use_gps: bool = True,
+    use_gps: bool = False,
     bias_override: bool = False,
 ) -> Optional[Tuple[float, np.ndarray, np.ndarray]]:
     """Align a reconstruction with GPS and GCP data."""
